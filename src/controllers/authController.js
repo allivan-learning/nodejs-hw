@@ -3,10 +3,14 @@ import createHttpError from 'http-errors';
 import { User } from '../models/user.js';
 import { Session } from '../models/session.js';
 import { createSession, setSessionCookies } from '../services/auth.js';
+import jwt from 'jsonwebtoken';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import handlebars from 'handlebars';
+import { sendEmail } from '../utils/sendMail.js';
 
-
-export const registerUser = async (req, res, next) => { 
-  try { 
+export const registerUser = async (req, res, next) => {
+  try {
     const { email, password } = req.body;
 
     const existingUser = await User.findOne({ email });
@@ -23,7 +27,7 @@ export const registerUser = async (req, res, next) => {
     });
 
     const newSession = await createSession(newUser._id);
-    
+
     setSessionCookies(res, newSession);
 
     res.status(201).json({
@@ -34,7 +38,7 @@ export const registerUser = async (req, res, next) => {
     });
   } catch (error) {
     console.error('🚨 НАСТОЯЩАЯ ОШИБКА:', error);
-    next(error); 
+    next(error);
   }
 };
 
@@ -59,38 +63,36 @@ export const loginUser = async (req, res, next) => {
     const newSession = await createSession(user._id);
 
     setSessionCookies(res, newSession);
-    
+
     res.status(200).json({
       message: 'Successfully logged in',
       session: newSession,
       user,
     });
-  }
-  catch (error) {
+  } catch (error) {
     next(error);
   }
 };
 
-export const logoutUser = async (req, res, next) => { 
+export const logoutUser = async (req, res, next) => {
   try {
     const { sessionId } = req.cookies;
-    
+
     if (sessionId) {
       await Session.deleteOne({ _id: sessionId });
     }
-    
+
     res.clearCookie('sessionId');
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
 
     res.status(204).send();
-  }
-  catch (error) {
+  } catch (error) {
     next(error);
   }
 };
 
-export const refreshUserSession = async (req, res, next) => { 
+export const refreshUserSession = async (req, res, next) => {
   try {
     const { refreshToken, sessionId } = req.cookies;
 
@@ -127,5 +129,99 @@ export const refreshUserSession = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+export const requestResetEmail = async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    return res.status(200).json({
+      message: 'Password reset email sent successfully',
+    });
+  }
+
+  const resetToken = jwt.sign(
+    { sub: user._id, email },
+    process.env.JWT_SECRET,
+    { expiresIn: '15m' },
+  );
+
+  const resetLink = `${process.env.FRONTEND_DOMAIN}/reset-password?token=${resetToken}`;
+
+  // ЗМІНА ЗА ТЗ: використання Handlebars замість простого рядка
+  const templatePath = path.join(
+    process.cwd(),
+    'src',
+    'templates',
+    'reset-password-email.html',
+  );
+  const templateSource = await fs.readFile(templatePath, 'utf-8');
+  const template = handlebars.compile(templateSource);
+  const html = template({
+    name: user.name,
+    link: resetLink,
+  });
+
+  try {
+    await sendEmail({
+      from: process.env.SMTP_FROM,
+      to: email,
+      subject: 'Reset your password',
+      html: html, // Передаємо зібраний шаблон
+    });
+  } catch {
+    throw createHttpError(
+      500,
+      'Failed to send the email, please try again later.',
+    );
+  }
+
+  // ЗМІНА ЗА ТЗ: повідомлення має бути саме таким
+  res.status(200).json({
+    message: 'Password reset email sent successfully',
+  });
+};
+
+export const resetPassword = async (req, res) => {
+  const { token, password } = req.body;
+
+  try {
+    // 1. Верифікуємо токен
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // 2. Шукаємо користувача за sub та email
+    const user = await User.findOne({
+      _id: decoded.sub,
+      email: decoded.email,
+    });
+
+    if (!user) {
+      throw createHttpError(404, 'User not found');
+    }
+
+    // 3. Шифруємо новий пароль
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 4. Оновлюємо пароль у базі
+    user.password = hashedPassword;
+    await user.save();
+
+    // 5. Повертаємо успішну відповідь
+    res.status(200).json({
+      message: 'Password reset successfully',
+    });
+  } catch (error) {
+    // Якщо помилка пов'язана з JWT (невалідний або прострочений)
+    if (
+      error.name === 'TokenExpiredError' ||
+      error.name === 'JsonWebTokenError'
+    ) {
+      throw createHttpError(401, 'Invalid or expired token');
+    }
+    // Прокидаємо інші помилки далі (щоб їх зловив ваш ctrlWrapper)
+    throw error;
   }
 };

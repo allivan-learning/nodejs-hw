@@ -10,6 +10,7 @@ import notesRouter from './routes/notesRoutes.js';
 import {errors} from 'celebrate';
 import authRoutes from './routes/authRoutes.js';
 import cookieParser from 'cookie-parser';
+import userRoutes from './routes/userRoutes.js';
 
 dotenv.config();
 
@@ -22,10 +23,16 @@ export const setupServer = async () => {
   app.use(cors());
   app.use(cookieParser());
   app.use(express.json());
+
   app.use(authRoutes);
   app.use(notesRouter);
+  app.use(userRoutes); 
 
   app.use(errors());
+app.use((req, res, next) => {
+  console.log(`🔍 Запрос пришел на: ${req.method} ${req.url}`);
+  next();
+});
   app.use(notFoundHandler);
   app.use(errorHandler);
   
