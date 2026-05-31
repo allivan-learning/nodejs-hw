@@ -31,7 +31,7 @@ export const updateUserAvatar = async (req, res, next) => {
 
     console.log('👉 1. Файл отримано. Користувач з токена:', user?._id);
 
-    const result = await saveFileToCloudinary(file.buffer);
+    const result = await saveFileToCloudinary(file.buffer, user._id);
     console.log('👉 2. Успішно завантажено в Cloudinary:', result.secure_url);
 
     const updatedUser = await User.findByIdAndUpdate(

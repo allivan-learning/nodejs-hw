@@ -28,15 +28,10 @@ export const setupServer = async () => {
   app.use(notesRouter);
   app.use(userRoutes); 
 
-  app.use(errors());
-app.use((req, res, next) => {
-  console.log(`🔍 Запрос пришел на: ${req.method} ${req.url}`);
-  next();
-});
   app.use(notFoundHandler);
+app.use(errors());
   app.use(errorHandler);
   
-
   const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
